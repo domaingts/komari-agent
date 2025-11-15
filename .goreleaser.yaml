@@ -11,6 +11,7 @@ builds:
       - -v
       - -trimpath
     ldflags:
+      - -X github.com/komari-monitor/komari-agent/update.CurrentVersion={{.Version}}
       - -s
       - -w
       - -buildid=
