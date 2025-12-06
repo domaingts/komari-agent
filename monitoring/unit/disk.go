@@ -77,6 +77,7 @@ func isPhysicalDisk(part disk.PartitionStat) bool {
 		"/etc/resolv.conf",
 		"/etc/host", // /etc/hosts,/etc/hostname
 		"/dev/hugepages",
+		"/nix/store",
 	}
 	for _, mp := range mountpointsToExclude {
 		if mountpoint == mp || strings.HasPrefix(mountpoint, mp) {
@@ -85,6 +86,10 @@ func isPhysicalDisk(part disk.PartitionStat) bool {
 	}
 
 	fstype := strings.ToLower(part.Fstype)
+	// 针对 Linux 下通过 ntfs-3g 挂载的 NTFS 分区 (fuseblk)，这是实际物理磁盘，不应排除
+	if fstype == "fuseblk" {
+		return true
+	}
 	var fstypeToExclude = []string{
 		"tmpfs",
 		"devtmpfs",
