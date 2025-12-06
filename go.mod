@@ -11,15 +11,15 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/prometheus-community/pro-bing v0.7.0
 	github.com/rhysd/go-github-selfupdate v1.2.3
-	github.com/shirou/gopsutil/v4 v4.25.10
-	github.com/spf13/cobra v1.10.1
+	github.com/shirou/gopsutil/v4 v4.25.11
+	github.com/spf13/cobra v1.10.2
 	golang.org/x/net v0.47.0
 	golang.org/x/sys v0.38.0
 	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
 )
 
 require (
-	github.com/ebitengine/purego v0.9.0 // indirect
+	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/google/go-github/v30 v30.1.0 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
@@ -31,8 +31,8 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/tcnksm/go-gitconfig v0.1.2 // indirect
-	github.com/tklauser/go-sysconf v0.3.15 // indirect
-	github.com/tklauser/numcpus v0.10.0 // indirect
+	github.com/tklauser/go-sysconf v0.3.16 // indirect
+	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/ulikunitz/xz v0.5.9 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/crypto v0.44.0 // indirect
