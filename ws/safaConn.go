@@ -25,7 +25,7 @@ func (sc *SafeConn) WriteMessage(messageType int, data []byte) error {
 	return sc.conn.WriteMessage(messageType, data)
 }
 
-func (sc *SafeConn) WriteJSON(v interface{}) error {
+func (sc *SafeConn) WriteJSON(v any) error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	return sc.conn.WriteJSON(v)
@@ -41,7 +41,7 @@ func (sc *SafeConn) ReadMessage() (int, []byte, error) {
 	// defer sc.mu.Unlock()
 	return sc.conn.ReadMessage()
 }
-func (sc *SafeConn) ReadJSON(v interface{}) error {
+func (sc *SafeConn) ReadJSON(v any) error {
 	// sc.mu.Lock()
 	// defer sc.mu.Unlock()
 	return sc.conn.ReadJSON(v)

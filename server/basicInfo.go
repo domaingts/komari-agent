@@ -42,7 +42,7 @@ func uploadBasicInfo() error {
 	kernelVersion := monitoring.KernelVersion()
 	ipv4, ipv6, _ := monitoring.GetIPAddress()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"cpu_name":       cpu.CPUName,
 		"cpu_cores":      cpu.CPUCores,
 		"arch":           cpu.CPUArchitecture,
@@ -71,7 +71,7 @@ func uploadBasicInfo() error {
 	return nil
 }
 
-func tryUploadData(data map[string]interface{}) error {
+func tryUploadData(data map[string]any) error {
 	endpoint := strings.TrimSuffix(flags.Endpoint, "/") + "/api/clients/uploadBasicInfo?token=" + flags.Token
 	payload, err := json.Marshal(data)
 	if err != nil {

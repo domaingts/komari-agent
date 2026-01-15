@@ -73,7 +73,7 @@ func (rsmi *ROCmSMI) pollROCmSMI() []byte {
 }
 
 func (rsmi *ROCmSMI) gatherModel() ([]string, error) {
-	var data map[string]interface{}
+	var data map[string]any
 	var models []string
 
 	if err := json.Unmarshal(rsmi.data, &data); err != nil {
@@ -83,7 +83,7 @@ func (rsmi *ROCmSMI) gatherModel() ([]string, error) {
 	// 解析JSON结构获取GPU型号
 	for key, value := range data {
 		if strings.HasPrefix(key, "card") {
-			if cardData, ok := value.(map[string]interface{}); ok {
+			if cardData, ok := value.(map[string]any); ok {
 				if name, exists := cardData["Card series"]; exists {
 					if nameStr, ok := name.(string); ok && nameStr != "" {
 						models = append(models, nameStr)
@@ -97,7 +97,7 @@ func (rsmi *ROCmSMI) gatherModel() ([]string, error) {
 }
 
 func (rsmi *ROCmSMI) gatherUsage() ([]float64, error) {
-	var data map[string]interface{}
+	var data map[string]any
 	var usageList []float64
 
 	if err := json.Unmarshal(rsmi.data, &data); err != nil {
@@ -107,7 +107,7 @@ func (rsmi *ROCmSMI) gatherUsage() ([]float64, error) {
 	// 解析JSON结构获取GPU使用率
 	for key, value := range data {
 		if strings.HasPrefix(key, "card") {
-			if cardData, ok := value.(map[string]interface{}); ok {
+			if cardData, ok := value.(map[string]any); ok {
 				usage := 0.0
 				if utilizationData, exists := cardData["GPU use (%)"]; exists {
 					if utilizationStr, ok := utilizationData.(string); ok {
@@ -129,7 +129,7 @@ func (rsmi *ROCmSMI) gatherDetailedInfo() ([]AMDGPUInfo, error) {
 		return nil, errors.New("no data available")
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	var gpuInfos []AMDGPUInfo
 
 	if err := json.Unmarshal(rsmi.data, &data); err != nil {
@@ -139,7 +139,7 @@ func (rsmi *ROCmSMI) gatherDetailedInfo() ([]AMDGPUInfo, error) {
 	// 解析每个GPU卡的详细信息
 	for key, value := range data {
 		if strings.HasPrefix(key, "card") {
-			if cardData, ok := value.(map[string]interface{}); ok {
+			if cardData, ok := value.(map[string]any); ok {
 				gpuInfo := AMDGPUInfo{}
 
 				// 获取GPU名称

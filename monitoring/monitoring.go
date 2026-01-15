@@ -13,37 +13,37 @@ var flags = pkg_flags.GlobalConfig
 
 func GenerateReport() []byte {
 	message := ""
-	data := map[string]interface{}{}
+	data := map[string]any{}
 
 	cpu := monitoring.Cpu()
 	cpuUsage := cpu.CPUUsage
 	if cpuUsage <= 0.001 {
 		cpuUsage = 0.001
 	}
-	data["cpu"] = map[string]interface{}{
+	data["cpu"] = map[string]any{
 		"usage": cpuUsage,
 	}
 
 	ram := monitoring.Ram()
-	data["ram"] = map[string]interface{}{
+	data["ram"] = map[string]any{
 		"total": ram.Total,
 		"used":  ram.Used,
 	}
 
 	swap := monitoring.Swap()
-	data["swap"] = map[string]interface{}{
+	data["swap"] = map[string]any{
 		"total": swap.Total,
 		"used":  swap.Used,
 	}
 	load := monitoring.Load()
-	data["load"] = map[string]interface{}{
+	data["load"] = map[string]any{
 		"load1":  load.Load1,
 		"load5":  load.Load5,
 		"load15": load.Load15,
 	}
 
 	disk := monitoring.Disk()
-	data["disk"] = map[string]interface{}{
+	data["disk"] = map[string]any{
 		"total": disk.Total,
 		"used":  disk.Used,
 	}
@@ -52,7 +52,7 @@ func GenerateReport() []byte {
 	if err != nil {
 		message += fmt.Sprintf("failed to get network speed: %v\n", err)
 	}
-	data["network"] = map[string]interface{}{
+	data["network"] = map[string]any{
 		"up":        networkUp,
 		"down":      networkDown,
 		"totalUp":   totalUp,
@@ -63,7 +63,7 @@ func GenerateReport() []byte {
 	if err != nil {
 		message += fmt.Sprintf("failed to get connections: %v\n", err)
 	}
-	data["connections"] = map[string]interface{}{
+	data["connections"] = map[string]any{
 		"tcp": tcpCount,
 		"udp": udpCount,
 	}
@@ -86,17 +86,17 @@ func GenerateReport() []byte {
 			// 降级到基础GPU信息
 			gpuNames, nameErr := monitoring.GetDetailedGPUHost()
 			if nameErr == nil && len(gpuNames) > 0 {
-				data["gpu"] = map[string]interface{}{
+				data["gpu"] = map[string]any{
 					"models": gpuNames,
 				}
 			}
 		} else {
 			// 成功获取详细信息
-			gpuData := make([]map[string]interface{}, len(gpuInfo))
+			gpuData := make([]map[string]any, len(gpuInfo))
 			totalGPUUsage := 0.0
 
 			for i, info := range gpuInfo {
-				gpuData[i] = map[string]interface{}{
+				gpuData[i] = map[string]any{
 					"name":         info.Name,
 					"memory_total": info.MemoryTotal,
 					"memory_used":  info.MemoryUsed,
@@ -108,7 +108,7 @@ func GenerateReport() []byte {
 
 			avgGPUUsage := totalGPUUsage / float64(len(gpuInfo))
 
-			data["gpu"] = map[string]interface{}{
+			data["gpu"] = map[string]any{
 				"count":         len(gpuInfo),
 				"average_usage": avgGPUUsage,
 				"detailed_info": gpuData,

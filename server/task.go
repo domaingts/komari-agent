@@ -55,7 +55,7 @@ func NewTask(task_id, command string) {
 }
 
 func uploadTaskResult(taskID, result string, exitCode int, finishedAt time.Time) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"task_id":     taskID,
 		"result":      result,
 		"exit_code":   exitCode,
@@ -259,7 +259,7 @@ func resolveIP(target string) (string, error) {
 // 	} else {
 // 		pingResult = int(latency)
 // 	}
-// 	payload := map[string]interface{}{
+// 	payload := map[string]any{
 // 		"type":        "ping_result",
 // 		"task_id":     taskID,
 // 		"ping_type":   pingType,
