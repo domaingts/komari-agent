@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/komari-monitor/komari-agent/dnsresolver"
 	"github.com/komari-monitor/komari-agent/monitoring"
-	"github.com/komari-monitor/komari-agent/terminal"
 	"github.com/komari-monitor/komari-agent/utils"
 	"github.com/komari-monitor/komari-agent/ws"
 )
@@ -140,52 +139,52 @@ func handleWebSocketMessages(conn *ws.SafeConn, done chan<- struct{}) {
 			continue
 		}
 
-		if message.Message == "terminal" || message.TerminalId != "" {
-			go establishTerminalConnection(flags.Token, message.TerminalId, flags.Endpoint)
-			continue
-		}
+		// if message.Message == "terminal" || message.TerminalId != "" {
+		// 	go establishTerminalConnection(flags.Token, message.TerminalId, flags.Endpoint)
+		// 	continue
+		// }
 		if message.Message == "exec" {
 			go NewTask(message.ExecTaskID, message.ExecCommand)
 			continue
 		}
-		if message.Message == "ping" || message.PingTaskID != 0 || message.PingType != "" || message.PingTarget != "" {
-			go NewPingTask(conn, message.PingTaskID, message.PingType, message.PingTarget)
-			continue
-		}
+		// if message.Message == "ping" || message.PingTaskID != 0 || message.PingType != "" || message.PingTarget != "" {
+		// 	go NewPingTask(conn, message.PingTaskID, message.PingType, message.PingTarget)
+		// 	continue
+		// }
 	}
 }
 
 // connectWebSocket attempts to establish a WebSocket connection and upload basic info
 
-// establishTerminalConnection 建立终端连接并使用terminal包处理终端操作
-func establishTerminalConnection(token, id, endpoint string) {
-	endpoint = strings.TrimSuffix(endpoint, "/") + "/api/clients/terminal?token=" + token + "&id=" + id
-	endpoint = "ws" + strings.TrimPrefix(endpoint, "http")
+// // establishTerminalConnection 建立终端连接并使用terminal包处理终端操作
+// func establishTerminalConnection(token, id, endpoint string) {
+// 	endpoint = strings.TrimSuffix(endpoint, "/") + "/api/clients/terminal?token=" + token + "&id=" + id
+// 	endpoint = "ws" + strings.TrimPrefix(endpoint, "http")
 
-	// 转换中文域名为 ASCII 兼容编码
-	if convertedEndpoint, err := utils.ConvertIDNToASCII(endpoint); err == nil {
-		endpoint = convertedEndpoint
-	} else {
-		log.Printf("Warning: Failed to convert Terminal WebSocket IDN to ASCII: %v", err)
-	}
+// 	// 转换中文域名为 ASCII 兼容编码
+// 	if convertedEndpoint, err := utils.ConvertIDNToASCII(endpoint); err == nil {
+// 		endpoint = convertedEndpoint
+// 	} else {
+// 		log.Printf("Warning: Failed to convert Terminal WebSocket IDN to ASCII: %v", err)
+// 	}
 
-	// 使用与主 WS 相同的拨号策略
-	dialer := newWSDialer()
+// 	// 使用与主 WS 相同的拨号策略
+// 	dialer := newWSDialer()
 
-	headers := newWSHeaders()
+// 	headers := newWSHeaders()
 
-	conn, _, err := dialer.Dial(endpoint, headers)
-	if err != nil {
-		log.Println("Failed to establish terminal connection:", err)
-		return
-	}
+// 	conn, _, err := dialer.Dial(endpoint, headers)
+// 	if err != nil {
+// 		log.Println("Failed to establish terminal connection:", err)
+// 		return
+// 	}
 
-	// 启动终端
-	terminal.StartTerminal(conn)
-	if conn != nil {
-		conn.Close()
-	}
-}
+// 	// 启动终端
+// 	terminal.StartTerminal(conn)
+// 	if conn != nil {
+// 		conn.Close()
+// 	}
+// }
 
 // newWSDialer 构造统一的 WebSocket 拨号器（自定义解析、IPv4/IPv6 动态排序、可选 TLS 忽略）
 func newWSDialer() *websocket.Dialer {
