@@ -92,12 +92,12 @@ type VnstatTotal struct {
 
 // VnstatTimeEntry represents a time-based traffic entry
 type VnstatTimeEntry struct {
-	ID        int            `json:"id"`
-	Date      VnstatDateInfo `json:"date"`
-	Time      VnstatTimeInfo `json:"time,omitempty"`
-	Timestamp int64          `json:"timestamp"`
-	Rx        uint64         `json:"rx"`
-	Tx        uint64         `json:"tx"`
+	ID        int             `json:"id"`
+	Date      VnstatDateInfo  `json:"date"`
+	Time      *VnstatTimeInfo `json:"time,omitempty"`
+	Timestamp int64           `json:"timestamp"`
+	Rx        uint64          `json:"rx"`
+	Tx        uint64          `json:"tx"`
 }
 
 // VnstatMonthEntry represents a monthly traffic entry
@@ -157,7 +157,7 @@ func NetworkSpeed() (totalUp, totalDown, upSpeed, downSpeed uint64, err error) {
 			return totalUp, totalDown, 0, 0, err
 		}
 
-		return totalUp, totalDown, upSpeed, downSpeed, nil
+		return networkUp + totalUp, networkDown + totalDown, upSpeed, downSpeed, nil
 	}
 
 	// 如果没有设置月重置，使用原来的方法
