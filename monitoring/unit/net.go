@@ -157,7 +157,7 @@ func NetworkSpeed() (totalUp, totalDown, upSpeed, downSpeed uint64, err error) {
 			return totalUp, totalDown, 0, 0, err
 		}
 
-		return networkUp + totalUp, networkDown + totalDown, upSpeed, downSpeed, nil
+		return totalUp, totalDown, upSpeed, downSpeed, nil
 	}
 
 	// 如果没有设置月重置，使用原来的方法
@@ -210,7 +210,7 @@ func getNetworkSpeedFallback(includeNics, excludeNics map[string]struct{}) (tota
 	upSpeed = totalUp2 - totalUp1
 	downSpeed = totalDown2 - totalDown1
 
-	return totalUp2, totalDown2, upSpeed, downSpeed, nil
+	return networkUp + totalUp2, networkDown + totalDown2, upSpeed, downSpeed, nil
 }
 
 func parseNics(nics string) map[string]struct{} {

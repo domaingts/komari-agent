@@ -26,7 +26,6 @@ type Base struct {
 
 func setBaseTraffic() {
 	gob.Register(Base{})
-	_, err := os.Stat("/usr/bin/vnstat")
 	o, err := exec.Command("/usr/bin/vnstat", "--json", "m").Output()
 	if err != nil {
 		return
