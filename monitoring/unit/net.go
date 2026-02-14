@@ -92,12 +92,12 @@ type VnstatTotal struct {
 
 // VnstatTimeEntry represents a time-based traffic entry
 type VnstatTimeEntry struct {
-	ID        int             `json:"id"`
-	Date      VnstatDateInfo  `json:"date"`
-	Time      *VnstatTimeInfo `json:"time,omitempty"`
-	Timestamp int64           `json:"timestamp"`
-	Rx        uint64          `json:"rx"`
-	Tx        uint64          `json:"tx"`
+	ID        int            `json:"id"`
+	Date      VnstatDateInfo `json:"date"`
+	Time      VnstatTimeInfo `json:"time,omitempty"`
+	Timestamp int64          `json:"timestamp"`
+	Rx        uint64         `json:"rx"`
+	Tx        uint64         `json:"tx"`
 }
 
 // VnstatMonthEntry represents a monthly traffic entry
@@ -210,7 +210,7 @@ func getNetworkSpeedFallback(includeNics, excludeNics map[string]struct{}) (tota
 	upSpeed = totalUp2 - totalUp1
 	downSpeed = totalDown2 - totalDown1
 
-	return networkUp + totalUp2, networkDown + totalDown2, upSpeed, downSpeed, nil
+	return totalUp2, totalDown2, upSpeed, downSpeed, nil
 }
 
 func parseNics(nics string) map[string]struct{} {
