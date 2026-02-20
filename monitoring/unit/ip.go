@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/komari-monitor/komari-agent/dnsresolver"
@@ -165,12 +166,7 @@ func getIPFromInterfaces(nicNames []string) (ipv4, ipv6 string) {
 	for _, iface := range interfaces {
 		// 检查接口是否在允许列表中
 		if !func(slice []string, item string) bool {
-			for _, s := range slice {
-				if s == item {
-					return true
-				}
-			}
-			return false
+			return slices.Contains(slice, item)
 		}(nicNames, iface.Name) {
 			continue
 		}

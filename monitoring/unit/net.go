@@ -94,7 +94,7 @@ type VnstatTotal struct {
 type VnstatTimeEntry struct {
 	ID        int            `json:"id"`
 	Date      VnstatDateInfo `json:"date"`
-	Time      VnstatTimeInfo `json:"time,omitempty"`
+	Time      VnstatTimeInfo `json:"time"`
 	Timestamp int64          `json:"timestamp"`
 	Rx        uint64         `json:"rx"`
 	Tx        uint64         `json:"tx"`
@@ -218,7 +218,7 @@ func parseNics(nics string) map[string]struct{} {
 		return nil
 	}
 	nicSet := make(map[string]struct{})
-	for _, nic := range strings.Split(nics, ",") {
+	for nic := range strings.SplitSeq(nics, ",") {
 		nicSet[strings.TrimSpace(nic)] = struct{}{}
 	}
 	return nicSet

@@ -1,5 +1,4 @@
 //go:build !windows
-// +build !windows
 
 package monitoring
 
@@ -101,10 +100,10 @@ func readSynologyInfo(filename string) string {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		if strings.HasPrefix(line, "unique=") {
-			unique = strings.Trim(strings.TrimPrefix(line, "unique="), `"`)
-		} else if strings.HasPrefix(line, "udc_check_state=") {
-			udcCheckState = strings.Trim(strings.TrimPrefix(line, "udc_check_state="), `"`)
+		if after, ok := strings.CutPrefix(line, "unique="); ok {
+			unique = strings.Trim(after, `"`)
+		} else if after, ok := strings.CutPrefix(line, "udc_check_state="); ok {
+			udcCheckState = strings.Trim(after, `"`)
 		}
 	}
 
@@ -243,12 +242,12 @@ func readAndroidBuildProp() string {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		if strings.HasPrefix(line, "ro.build.version.release=") {
-			version = strings.TrimPrefix(line, "ro.build.version.release=")
-		} else if strings.HasPrefix(line, "ro.product.model=") {
-			model = strings.TrimPrefix(line, "ro.product.model=")
-		} else if strings.HasPrefix(line, "ro.product.brand=") {
-			brand = strings.TrimPrefix(line, "ro.product.brand=")
+		if after, ok := strings.CutPrefix(line, "ro.build.version.release="); ok {
+			version = after
+		} else if after, ok := strings.CutPrefix(line, "ro.product.model="); ok {
+			model = after
+		} else if after, ok := strings.CutPrefix(line, "ro.product.brand="); ok {
+			brand = after
 		}
 
 		// If all information has been collected, we can exit early

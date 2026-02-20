@@ -22,8 +22,8 @@ func Disk() DiskInfo {
 	} else {
 		// 如果指定了自定义挂载点，只统计指定的挂载点
 		if flags.IncludeMountpoints != "" {
-			includeMounts := strings.Split(flags.IncludeMountpoints, ";")
-			for _, mountpoint := range includeMounts {
+			includeMounts := strings.SplitSeq(flags.IncludeMountpoints, ";")
+			for mountpoint := range includeMounts {
 				mountpoint = strings.TrimSpace(mountpoint)
 				if mountpoint != "" {
 					u, err := disk.Usage(mountpoint)
@@ -160,8 +160,8 @@ func isPhysicalDisk(part disk.PartitionStat) bool {
 func DiskList() ([]string, error) {
 	diskList := []string{}
 	if flags.IncludeMountpoints != "" {
-		includeMounts := strings.Split(flags.IncludeMountpoints, ";")
-		for _, mountpoint := range includeMounts {
+		includeMounts := strings.SplitSeq(flags.IncludeMountpoints, ";")
+		for mountpoint := range includeMounts {
 			mountpoint = strings.TrimSpace(mountpoint)
 			if mountpoint != "" {
 				diskList = append(diskList, mountpoint)

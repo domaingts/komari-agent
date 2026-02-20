@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -75,12 +76,7 @@ func isNicAllowed(name string) bool {
 	if len(config.Nics) == 0 {
 		return true
 	}
-	for _, n := range config.Nics {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(config.Nics, name)
 }
 
 func ensureInitLocked() {
