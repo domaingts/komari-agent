@@ -143,10 +143,10 @@ func handleWebSocketMessages(conn *ws.SafeConn, done chan<- struct{}) {
 		// 	go establishTerminalConnection(flags.Token, message.TerminalId, flags.Endpoint)
 		// 	continue
 		// }
-		if message.Message == "exec" {
-			go NewTask(message.ExecTaskID, message.ExecCommand)
-			continue
-		}
+		// if message.Message == "exec" {
+		// 	go NewTask(message.ExecTaskID, message.ExecCommand)
+		// 	continue
+		// }
 		// if message.Message == "ping" || message.PingTaskID != 0 || message.PingType != "" || message.PingTarget != "" {
 		// 	go NewPingTask(conn, message.PingTaskID, message.PingType, message.PingTarget)
 		// 	continue
@@ -191,6 +191,7 @@ func newWSDialer() *websocket.Dialer {
 	d := &websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
 		NetDialContext:   dnsresolver.GetDialContext(15 * time.Second),
+		Proxy:            http.ProxyFromEnvironment,
 	}
 	if flags.IgnoreUnsafeCert {
 		d.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}

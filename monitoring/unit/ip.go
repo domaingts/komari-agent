@@ -17,6 +17,7 @@ var (
 	// 创建适用于IPv4和IPv6的HTTP客户端
 	ipv4HTTPClient = &http.Client{
 		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				dialer := dnsresolver.GetNetDialer(15 * time.Second)
 				return dialer.DialContext(ctx, "tcp4", addr) // 锁v4防止出现问题
@@ -30,6 +31,7 @@ var (
 	}
 	ipv6HTTPClient = &http.Client{
 		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				dialer := dnsresolver.GetNetDialer(15 * time.Second)
 				return dialer.DialContext(ctx, "tcp6", addr) // 锁v6防止出现问题
@@ -88,7 +90,7 @@ func GetIPv6Address() (string, error) {
 		"https://v6.ip.zxinc.org/info.php?type=json",
 		"https://api6.ipify.org?format=json",
 		"https://ipv6.icanhazip.com",
-		"https://api-ipv6.ip.sb/geoip",
+		"http://api-ipv6.ip.sb/geoip",
 	}
 
 	for _, api := range webAPIs {
