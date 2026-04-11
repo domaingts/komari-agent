@@ -17,11 +17,9 @@ import (
 )
 
 func EstablishWebSocketConnection() {
-
 	websocketEndpoint := strings.TrimSuffix(flags.Endpoint, "/") + "/api/clients/report?token=" + flags.Token
 	websocketEndpoint = "ws" + strings.TrimPrefix(websocketEndpoint, "http")
 
-	// 转换中文域名为 ASCII 兼容编码
 	if convertedEndpoint, err := utils.ConvertIDNToASCII(websocketEndpoint); err == nil {
 		websocketEndpoint = convertedEndpoint
 	} else {
@@ -34,12 +32,11 @@ func EstablishWebSocketConnection() {
 			conn.Close()
 		}
 	}()
+
 	var err error
-	var interval float64
+	interval := flags.Interval - 1
 	if flags.Interval <= 1 {
 		interval = 1
-	} else {
-		interval = flags.Interval - 1
 	}
 
 	dataTicker := time.NewTicker(time.Duration(interval * float64(time.Second)))
@@ -63,9 +60,8 @@ func EstablishWebSocketConnection() {
 						log.Println("WebSocket connected")
 						go handleWebSocketMessages(conn, make(chan struct{}))
 						break
-					} else {
-						log.Println("Failed to connect to WebSocket:", err)
 					}
+					log.Println("Failed to connect to WebSocket:", err)
 					retry++
 					time.Sleep(time.Duration(flags.ReconnectInterval) * time.Second)
 				}
@@ -81,17 +77,17 @@ func EstablishWebSocketConnection() {
 			if err != nil {
 				log.Println("Failed to send WebSocket message:", err)
 				conn.Close()
-				conn = nil // Mark connection as dead
-				continue
+				conn = nil
 			}
 		case <-heartbeatTicker.C:
-			if conn != nil {
-				err := conn.WriteMessage(websocket.PingMessage, nil)
-				if err != nil {
-					log.Println("Failed to send heartbeat:", err)
-					conn.Close()
-					conn = nil // Mark connection as dead
-				}
+			if conn == nil {
+				continue
+			}
+			err := conn.WriteMessage(websocket.PingMessage, nil)
+			if err != nil {
+				log.Println("Failed to send heartbeat:", err)
+				conn.Close()
+				conn = nil
 			}
 		}
 	}
@@ -99,12 +95,11 @@ func EstablishWebSocketConnection() {
 
 func connectWebSocket(websocketEndpoint string) (*ws.SafeConn, error) {
 	dialer := newWSDialer()
-
 	headers := newWSHeaders()
 
 	conn, resp, err := dialer.Dial(websocketEndpoint, headers)
 	if err != nil {
-		if resp != nil && resp.StatusCode != 101 {
+		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
 			return nil, fmt.Errorf("%s", resp.Status)
 		}
 		return nil, err
@@ -116,77 +111,19 @@ func connectWebSocket(websocketEndpoint string) (*ws.SafeConn, error) {
 func handleWebSocketMessages(conn *ws.SafeConn, done chan<- struct{}) {
 	defer close(done)
 	for {
-		_, message_raw, err := conn.ReadMessage()
+		_, messageRaw, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("WebSocket read error:", err)
 			return
 		}
-		var message struct {
-			Message string `json:"message"`
-			// Terminal
-			TerminalId string `json:"request_id,omitempty"`
-			// Remote Exec
-			ExecCommand string `json:"command,omitempty"`
-			ExecTaskID  string `json:"task_id,omitempty"`
-			// Ping
-			PingTaskID uint   `json:"ping_task_id,omitempty"`
-			PingType   string `json:"ping_type,omitempty"`
-			PingTarget string `json:"ping_target,omitempty"`
-		}
-		err = json.Unmarshal(message_raw, &message)
-		if err != nil {
-			log.Println("Bad ws message:", err)
-			continue
-		}
 
-		// if message.Message == "terminal" || message.TerminalId != "" {
-		// 	go establishTerminalConnection(flags.Token, message.TerminalId, flags.Endpoint)
-		// 	continue
-		// }
-		// if message.Message == "exec" {
-		// 	go NewTask(message.ExecTaskID, message.ExecCommand)
-		// 	continue
-		// }
-		// if message.Message == "ping" || message.PingTaskID != 0 || message.PingType != "" || message.PingTarget != "" {
-		// 	go NewPingTask(conn, message.PingTaskID, message.PingType, message.PingTarget)
-		// 	continue
-		// }
+		var message map[string]any
+		if err := json.Unmarshal(messageRaw, &message); err != nil {
+			log.Println("Bad ws message:", err)
+		}
 	}
 }
 
-// connectWebSocket attempts to establish a WebSocket connection and upload basic info
-
-// // establishTerminalConnection 建立终端连接并使用terminal包处理终端操作
-// func establishTerminalConnection(token, id, endpoint string) {
-// 	endpoint = strings.TrimSuffix(endpoint, "/") + "/api/clients/terminal?token=" + token + "&id=" + id
-// 	endpoint = "ws" + strings.TrimPrefix(endpoint, "http")
-
-// 	// 转换中文域名为 ASCII 兼容编码
-// 	if convertedEndpoint, err := utils.ConvertIDNToASCII(endpoint); err == nil {
-// 		endpoint = convertedEndpoint
-// 	} else {
-// 		log.Printf("Warning: Failed to convert Terminal WebSocket IDN to ASCII: %v", err)
-// 	}
-
-// 	// 使用与主 WS 相同的拨号策略
-// 	dialer := newWSDialer()
-
-// 	headers := newWSHeaders()
-
-// 	conn, _, err := dialer.Dial(endpoint, headers)
-// 	if err != nil {
-// 		log.Println("Failed to establish terminal connection:", err)
-// 		return
-// 	}
-
-// 	// 启动终端
-// 	terminal.StartTerminal(conn)
-// 	if conn != nil {
-// 		conn.Close()
-// 	}
-// }
-
-// newWSDialer 构造统一的 WebSocket 拨号器（自定义解析、IPv4/IPv6 动态排序、可选 TLS 忽略）
 func newWSDialer() *websocket.Dialer {
 	d := &websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
@@ -199,7 +136,6 @@ func newWSDialer() *websocket.Dialer {
 	return d
 }
 
-// newWSHeaders 统一构造 WS 请求头（含 Cloudflare Access 头）
 func newWSHeaders() http.Header {
 	headers := http.Header{}
 	if flags.CFAccessClientID != "" && flags.CFAccessClientSecret != "" {

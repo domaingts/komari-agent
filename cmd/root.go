@@ -13,14 +13,13 @@ import (
 	"strings"
 	"syscall"
 
+	pkg_flags "github.com/komari-monitor/komari-agent/cmd/flags"
 	"github.com/komari-monitor/komari-agent/dnsresolver"
 	"github.com/komari-monitor/komari-agent/monitoring/netstatic"
 	monitoring "github.com/komari-monitor/komari-agent/monitoring/unit"
 	"github.com/komari-monitor/komari-agent/server"
 	"github.com/komari-monitor/komari-agent/update"
 	"github.com/spf13/cobra"
-
-	pkg_flags "github.com/komari-monitor/komari-agent/cmd/flags"
 )
 
 var flags = pkg_flags.GlobalConfig
@@ -41,7 +40,7 @@ var RootCmd = &cobra.Command{
 				log.Fatalf("Failed to parse config file: %v", err)
 			}
 		}
-		// 捕获中止信号，优雅退出
+
 		stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		go func() {
@@ -50,15 +49,6 @@ var RootCmd = &cobra.Command{
 			netstatic.Stop()
 			os.Exit(0)
 		}()
-
-		// if flags.ShowWarning {
-		// 	ShowToast()
-		// 	os.Exit(0)
-		// }
-
-		// if !flags.DisableWebSsh {
-		// 	go WarnKomariRunning()
-		// }
 
 		if flags.MonthRotate != 0 {
 			err := netstatic.StartOrContinue()
@@ -80,16 +70,13 @@ var RootCmd = &cobra.Command{
 		log.Println("Komari Agent", update.CurrentVersion)
 		log.Println("Github Repo:", update.Repo)
 
-		// 设置 DNS 解析行为
 		if flags.CustomDNS != "" {
 			dnsresolver.SetCustomDNSServer(flags.CustomDNS)
 			log.Printf("Using custom DNS server: %s", flags.CustomDNS)
 		} else {
-			// 未设置则使用系统默认 DNS（不使用内置列表）
 			log.Printf("Using system default DNS resolver")
 		}
 
-		// Auto discovery
 		if flags.AutoDiscoveryKey != "" {
 			err := handleAutoDiscovery()
 			if err != nil {
@@ -97,6 +84,7 @@ var RootCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}
+
 		diskList, err := monitoring.DiskList()
 		if err != nil {
 			log.Println("Failed to get disk list:", err)
@@ -108,7 +96,6 @@ var RootCmd = &cobra.Command{
 		}
 		log.Println("Monitoring Interfaces:", interfaceList)
 
-		// 忽略不安全的证书
 		if flags.IgnoreUnsafeCert {
 			http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		}
@@ -121,20 +108,6 @@ var RootCmd = &cobra.Command{
 }
 
 func Execute() {
-	for i, arg := range os.Args {
-		if arg == "-autoUpdate" || arg == "--autoUpdate" {
-			log.Println("WARNING: The -autoUpdate flag is deprecated in version 0.0.9 and later. Use --disable-auto-update to configure auto-update behavior.")
-			// 从参数列表中移除该参数，防止cobra解析错误
-			os.Args = append(os.Args[:i], os.Args[i+1:]...)
-			break
-		}
-		if arg == "-memory-mode-available" || arg == "--memory-mode-available" {
-			//flags.MemoryIncludeCache = true
-			log.Println("WARNING: The --memory-mode-available flag is deprecated in version 1.0.70 and later. Use --memory-include-cache to report memory usage including cache/buffer.")
-			os.Args = append(os.Args[:i], os.Args[i+1:]...)
-		}
-	}
-
 	if err := RootCmd.Execute(); err != nil {
 		log.Println(err)
 	}
@@ -142,13 +115,8 @@ func Execute() {
 
 func init() {
 	RootCmd.PersistentFlags().StringVarP(&flags.Token, "token", "t", "", "API token")
-	//RootCmd.MarkPersistentFlagRequired("token")
 	RootCmd.PersistentFlags().StringVarP(&flags.Endpoint, "endpoint", "e", "", "API endpoint")
-	//RootCmd.MarkPersistentFlagRequired("endpoint")
 	RootCmd.PersistentFlags().StringVar(&flags.AutoDiscoveryKey, "auto-discovery", "", "Auto discovery key for the agent")
-	RootCmd.PersistentFlags().BoolVar(&flags.DisableAutoUpdate, "disable-auto-update", false, "Disable automatic updates")
-	RootCmd.PersistentFlags().BoolVar(&flags.DisableWebSsh, "disable-web-ssh", false, "Disable remote control(web ssh and rce)")
-	//RootCmd.PersistentFlags().BoolVar(&flags.MemoryModeAvailable, "memory-mode-available", false, "[deprecated]Report memory as available instead of used.")
 	RootCmd.PersistentFlags().Float64VarP(&flags.Interval, "interval", "i", 1.0, "Interval in seconds")
 	RootCmd.PersistentFlags().BoolVarP(&flags.IgnoreUnsafeCert, "ignore-unsafe-cert", "u", false, "Ignore unsafe certificate errors")
 	RootCmd.PersistentFlags().IntVarP(&flags.MaxRetries, "max-retries", "r", 3, "Maximum number of retries")
@@ -179,19 +147,16 @@ func loadFromEnv() {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
-		// Get the env tag
 		envTag := fieldType.Tag.Get("env")
 		if envTag == "" {
 			continue
 		}
 
-		// Get the environment variable value
 		envValue := os.Getenv(envTag)
 		if envValue == "" {
 			continue
 		}
 
-		// Set the field based on its type
 		switch field.Kind() {
 		case reflect.String:
 			field.SetString(envValue)
