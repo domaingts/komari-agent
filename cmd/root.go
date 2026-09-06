@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	pkg_flags "github.com/komari-monitor/komari-agent/cmd/flags"
 	"github.com/komari-monitor/komari-agent/dnsresolver"
@@ -28,17 +31,12 @@ var RootCmd = &cobra.Command{
 	Use:   "komari-agent",
 	Short: "komari agent",
 	Long:  `komari agent`,
-	Run: func(cmd *cobra.Command, args []string) {
-		loadFromEnv() // 从环境变量加载配置，覆盖解析
-		if flags.ConfigFile != "" {
-			bytes, err := os.ReadFile(flags.ConfigFile)
-			if err != nil {
-				log.Fatalf("Failed to read config file: %v", err)
-			}
-			err = json.Unmarshal(bytes, flags)
-			if err != nil {
-				log.Fatalf("Failed to parse config file: %v", err)
-			}
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := loadConfig(); err != nil {
+			return err
+		}
+		if err := validateConfig(); err != nil {
+			return err
 		}
 
 		stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -80,8 +78,7 @@ var RootCmd = &cobra.Command{
 		if flags.AutoDiscoveryKey != "" {
 			err := handleAutoDiscovery()
 			if err != nil {
-				log.Printf("Auto-discovery failed: %v", err)
-				os.Exit(1)
+				return fmt.Errorf("auto-discovery failed: %w", err)
 			}
 		}
 
@@ -110,6 +107,7 @@ var RootCmd = &cobra.Command{
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
 		log.Println(err)
+		os.Exit(1)
 	}
 }
 
@@ -136,7 +134,50 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&flags.CustomIpv6, "custom-ipv6", "", "Custom IPv6 address to use")
 	RootCmd.PersistentFlags().BoolVar(&flags.GetIpAddrFromNic, "get-ip-addr-from-nic", false, "Get IP address from network interface")
 	RootCmd.PersistentFlags().StringVar(&flags.ConfigFile, "config", "", "Path to the configuration file")
+	RootCmd.PersistentFlags().IntVar(&flags.ProtocolVersion, "protocol-version", 2, "Report protocol version (1 or 2)")
+	RootCmd.PersistentFlags().BoolVar(&flags.DisableCompression, "disable-compression", false, "Disable v2 gzip/permessage-deflate compression")
+	RootCmd.PersistentFlags().StringVar(&flags.PreferIPVersion, "prefer-ip-version", "", "Prefer IP version for dashboard connections: 4 or 6")
 	RootCmd.PersistentFlags().ParseErrorsWhitelist.UnknownFlags = true
+}
+
+func loadConfig() error {
+	loadFromEnv()
+	if flags.ConfigFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(flags.ConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+	if err := json.Unmarshal(data, flags); err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
+	}
+	return nil
+}
+
+func validateConfig() error {
+	if flags.ProtocolVersion == 0 {
+		flags.ProtocolVersion = 2
+	}
+	if flags.ProtocolVersion != 1 && flags.ProtocolVersion != 2 {
+		return fmt.Errorf("invalid --protocol-version value %d: expected 1 or 2", flags.ProtocolVersion)
+	}
+	if flags.PreferIPVersion != "" && flags.PreferIPVersion != "4" && flags.PreferIPVersion != "6" {
+		return fmt.Errorf("invalid --prefer-ip-version value %q: expected 4 or 6", flags.PreferIPVersion)
+	}
+	if math.IsNaN(flags.Interval) || math.IsInf(flags.Interval, 0) || flags.Interval <= 0 || flags.Interval >= float64(math.MaxInt64)/float64(time.Second) {
+		return fmt.Errorf("invalid --interval value: expected a positive, finite duration")
+	}
+	if flags.InfoReportInterval <= 0 || int64(flags.InfoReportInterval) > math.MaxInt64/int64(time.Minute) {
+		return fmt.Errorf("invalid --info-report-interval value: expected a positive duration in minutes")
+	}
+	if flags.ReconnectInterval < 0 || int64(flags.ReconnectInterval) > math.MaxInt64/int64(time.Second) {
+		return fmt.Errorf("invalid --reconnect-interval value: expected a nonnegative duration in seconds")
+	}
+	if flags.MaxRetries < 0 {
+		return fmt.Errorf("invalid --max-retries value: expected a nonnegative integer")
+	}
+	return nil
 }
 
 func loadFromEnv() {

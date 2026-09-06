@@ -20,7 +20,7 @@ func GpuName() string {
 	if err != nil {
 		return "Unknown"
 	}
-	gpuName := ""
+	var names []string
 	for _, subKey := range subKeys {
 		if !strings.HasPrefix(subKey, "0") {
 			continue
@@ -43,11 +43,8 @@ func GpuName() string {
 		if err != nil || openGLVersion == 0 {
 			continue
 		}
-		gpuName += deviceDesc + ", "
+		names = append(names, deviceDesc)
 	}
 
-	if gpuName != "" {
-		return strings.TrimSuffix(gpuName, ", ")
-	}
-	return "None"
+	return formatGPUNameList(names)
 }

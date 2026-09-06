@@ -74,9 +74,7 @@ func loadAutoDiscoveryConfig() (*AutoDiscoveryConfig, error) {
 }
 
 // saveAutoDiscoveryConfig 保存自动发现配置
-func saveAutoDiscoveryConfig(config *AutoDiscoveryConfig) error {
-	configPath := getAutoDiscoveryFilePath()
-
+func saveAutoDiscoveryConfig(configPath string, config *AutoDiscoveryConfig) error {
 	// 序列化为JSON
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -94,6 +92,10 @@ func saveAutoDiscoveryConfig(config *AutoDiscoveryConfig) error {
 
 // registerWithAutoDiscovery 使用自动发现key注册
 func registerWithAutoDiscovery() error {
+	return registerWithAutoDiscoveryAtPath(getAutoDiscoveryFilePath())
+}
+
+func registerWithAutoDiscoveryAtPath(configPath string) error {
 	// 构造注册请求
 	requestData := RegisterRequest{
 		Key: flags.AutoDiscoveryKey,
@@ -131,14 +133,10 @@ func registerWithAutoDiscovery() error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", flags.AutoDiscoveryKey))
 
-	// 添加Cloudflare Access头部
-	if flags.CFAccessClientID != "" && flags.CFAccessClientSecret != "" {
-		req.Header.Set("CF-Access-Client-Id", flags.CFAccessClientID)
-		req.Header.Set("CF-Access-Client-Secret", flags.CFAccessClientSecret)
-	}
+	utils.SetCloudflareAccessHeaders(req.Header, flags.CFAccessClientID, flags.CFAccessClientSecret)
 
 	// 发送请求
-	client := dnsresolver.GetHTTPClient(30 * time.Second)
+	client := dnsresolver.GetHTTPClientWithPreference(30*time.Second, flags.PreferIPVersion)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send register request: %v", err)
@@ -168,7 +166,7 @@ func registerWithAutoDiscovery() error {
 		Token: registerResp.Data.Token,
 	}
 
-	if err := saveAutoDiscoveryConfig(config); err != nil {
+	if err := saveAutoDiscoveryConfig(configPath, config); err != nil {
 		return fmt.Errorf("failed to save auto-discovery config: %v", err)
 	}
 

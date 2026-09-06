@@ -25,7 +25,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository-specific notes
 
-- There is no dedicated lint configuration in this repo. The routine validation path is `go test ./...`, `go build ./...`, and checking `go run . --help` when flags or commands change.
+- Go 1.27 or newer is required. There is no dedicated lint configuration in this repo. The routine validation path is `go test ./...`, `GOEXPERIMENT=jsonv2 go test ./...`, `go build ./...`, and checking `go run . --help` when flags or commands change.
+- This fork incorporates upstream 1.2.60 but remains reporting-only: do not restore remote execution, terminal, server-requested ping tasks, self-update, or their removed flags/dependencies. WebSocket heartbeat pings are retained.
 - Release builds inject `update.CurrentVersion` via GoReleaser (`.goreleaser.yaml`), so keep `update/update.go` small and stable.
 - `install.sh` currently appears to assume release artifact names that may not match `.goreleaser.yaml`; treat it carefully if touching release/install behavior.
 
@@ -36,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `main.go` just calls `cmd.Execute()`.
 - `cmd/root.go` is the real entrypoint. It defines the Cobra root command, binds flags, loads env vars via reflection from `cmd/flags/flag.go`, optionally overlays a JSON config file, and then starts the long-running agent loop.
 - Configuration precedence is:
-  1. Cobra defaults
+  1. Cobra defaults and parsed CLI flags
   2. environment variables via struct tags in `cmd/flags/flag.go`
   3. JSON config passed with `--config`
 - `cmd/autodiscovery.go` is a side-path in startup: if `--auto-discovery` is set, it registers with the server and persists the returned token in `auto-discovery.json` next to the executable.
@@ -47,7 +48,7 @@ Once startup is complete in `cmd/root.go`, the agent does three things:
 
 1. optionally starts net traffic accounting state in `monitoring/netstatic` when `--month-rotate` is enabled
 2. periodically uploads basic host metadata through `server/basicInfo.go`
-3. continuously reconnects and streams metric snapshots over WebSocket through `server/websocket.go`
+3. continuously reconnects and streams metric snapshots through `server/websocket.go`, with v2 HTTP POST fallback and negotiated v1 compatibility
 
 That means changes to runtime behavior usually cross `cmd/root.go`, `server/basicInfo.go`, `server/websocket.go`, and `monitoring/monitoring.go`.
 
@@ -56,7 +57,8 @@ That means changes to runtime behavior usually cross `cmd/root.go`, `server/basi
 - `monitoring/monitoring.go` assembles the outbound metrics payload.
 - Most raw metric collection lives in `monitoring/unit/`.
 - The `unit` package is intentionally OS-specific in places, with separate files for Linux, Darwin, Windows, and FreeBSD behavior.
-- Some collectors are not “cheap”: CPU usage and network speed sampling intentionally wait about a second to compute rates, so avoid calling them repeatedly in hot code paths outside the normal reporting loop.
+- CPU usage and network speed sampling are nonblocking and measure between samples; avoid extra calls that disturb the sampling window. Use `CpuStaticInfo()` for metadata. The reporting ticker no longer subtracts a second from the configured interval; this fork retains its one-second default.
+- Monthly network tests must isolate `netstatic.SaveFilePath`, stop accounting before cleanup, and restore global configuration; never write test accounting state into the working directory.
 
 Key metric areas:
 - CPU, memory, swap, load, uptime, process count
@@ -67,9 +69,11 @@ Key metric areas:
 ### Network and transport behavior
 
 - `dnsresolver/resolver.go` is central to outbound networking. It provides the custom DNS server option, fallback resolver behavior, IPv4/IPv6 ordering, and the dialers/transports used by both HTTP and WebSocket clients.
-- `server/basicInfo.go` uses the custom HTTP client from `dnsresolver` and uploads machine metadata to `/api/clients/uploadBasicInfo`.
-- `server/websocket.go` uses a websocket dialer built on `dnsresolver.GetDialContext`, keeps a persistent connection to `/api/clients/report`, sends metric payloads on a ticker, and sends heartbeat pings every 30 seconds.
-- Cloudflare Access headers are threaded through both HTTP and WebSocket request setup, so if auth-related connectivity changes are needed, inspect both server files and the shared resolver logic.
+- `dnsresolver` pools HTTP clients and supports `--prefer-ip-version` for panel connections; preference retains fallback to the other family. Authentication headers belong on individual panel requests, not pooled clients used by IP-discovery services.
+- `server/basicInfo.go` sends `agent.basicInfo` over v2 HTTP JSON-RPC, or uses `/api/clients/uploadBasicInfo` in legacy mode. `server/protocol_fallback.go` shares negotiated protocol state with reporting.
+- `server/websocket.go` uses a resolver-backed dialer and reports through `/api/clients/v2/rpc` by default, with HTTP POST fallback. Three consecutive protocol failures select v1 `/api/clients/report`; ordinary network errors do not count. WebSocket heartbeat pings remain every 30 seconds.
+- `protocol/transport/` and `protocol/v1/`/`protocol/v2/` contain reporting-only compression and wire-format helpers. Do not restore the removed task subsystem to obtain a helper.
+- Cloudflare Access is intentionally retained despite upstream's removal. `utils.SetCloudflareAccessHeaders` supplies the credential pair for registration, basic-info, v1/v2 WebSocket, and v2 POST requests.
 
 ### Versioning and release assumptions
 

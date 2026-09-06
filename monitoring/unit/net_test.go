@@ -1,7 +1,14 @@
 package monitoring
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/komari-monitor/komari-agent/monitoring/netstatic"
 )
 
 func TestConnectionsCount(t *testing.T) {
@@ -161,6 +168,42 @@ func TestShouldInclude(t *testing.T) {
 			excludeNics: nil,
 			expected:    false,
 		},
+		{
+			name:    "wildcard include",
+			nicName: "eth0",
+			includeNics: map[string]struct{}{
+				"eth*": {},
+			},
+			excludeNics: nil,
+			expected:    true,
+		},
+		{
+			name:        "wildcard exclude",
+			nicName:     "tun0",
+			includeNics: nil,
+			excludeNics: map[string]struct{}{
+				"tun*": {},
+			},
+			expected: false,
+		},
+		{
+			name:    "include takes precedence over exclude",
+			nicName: "eth0",
+			includeNics: map[string]struct{}{
+				"eth*": {},
+			},
+			excludeNics: map[string]struct{}{
+				"eth0": {},
+			},
+			expected: true,
+		},
+		{
+			name:        "tap remains included by default",
+			nicName:     "tap0",
+			includeNics: nil,
+			excludeNics: nil,
+			expected:    true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -187,11 +230,46 @@ func TestNetworkSpeedFallback(t *testing.T) {
 		totalUp, totalDown, upSpeed, downSpeed)
 }
 
+func isolateNetworkState(t *testing.T) {
+	t.Helper()
+	originalFlags := *flags
+	originalSaveFilePath := netstatic.SaveFilePath
+	temporarySaveFilePath := t.TempDir() + "/net_static.json"
+
+	// Point persistence at the temporary file before stopping any leaked worker.
+	netstatic.SaveFilePath = temporarySaveFilePath
+	if err := netstatic.Stop(); err != nil {
+		t.Fatalf("stop leaked netstatic worker: %v", err)
+	}
+	if err := netstatic.Clear(); err != nil {
+		t.Fatalf("clear netstatic state: %v", err)
+	}
+	resetNetworkSpeedSample()
+
+	t.Cleanup(func() {
+		// Cleanup runs before TempDir cleanup, so Stop can flush safely.
+		if err := netstatic.Stop(); err != nil {
+			t.Errorf("stop netstatic worker: %v", err)
+		}
+		_ = netstatic.Clear()
+		netstatic.SaveFilePath = originalSaveFilePath
+		*flags = originalFlags
+		resetNetworkSpeedSample()
+	})
+}
+
+func resetNetworkSpeedSample() {
+	networkSpeedSample.Lock()
+	networkSpeedSample.sampledAt = time.Time{}
+	networkSpeedSample.filterKey = ""
+	networkSpeedSample.counters = nil
+	networkSpeedSample.Unlock()
+}
+
 func TestNetworkSpeedWithoutMonthRotate(t *testing.T) {
+	isolateNetworkState(t)
 
-	flags.MonthRotate = 1
-
-	// 设置测试值
+	flags.MonthRotate = 0
 	flags.IncludeNics = ""
 	flags.ExcludeNics = ""
 
@@ -205,17 +283,7 @@ func TestNetworkSpeedWithoutMonthRotate(t *testing.T) {
 }
 
 func TestNetworkSpeedWithMonthRotate(t *testing.T) {
-	// 保存原始值
-	originalMonthRotate := flags.MonthRotate
-	originalIncludeNics := flags.IncludeNics
-	originalExcludeNics := flags.ExcludeNics
-
-	// 恢复原始值
-	defer func() {
-		flags.MonthRotate = originalMonthRotate
-		flags.IncludeNics = originalIncludeNics
-		flags.ExcludeNics = originalExcludeNics
-	}()
+	isolateNetworkState(t)
 
 	// 设置测试值 - 启用月重置
 	flags.MonthRotate = 1
@@ -258,4 +326,152 @@ func TestNetworkSpeedWithNicFilters(t *testing.T) {
 
 	t.Logf("With excludeNics - TotalUp: %d, TotalDown: %d, UpSpeed: %d/s, DownSpeed: %d/s",
 		totalUp, totalDown, upSpeed, downSpeed)
+}
+
+func TestUpdateNetworkSpeedSampleArithmetic(t *testing.T) {
+	resetNetworkSpeedSample()
+	t.Cleanup(resetNetworkSpeedSample)
+	base := time.Unix(100, 0)
+	updateNetworkSpeedSample := func(tx, rx uint64, now time.Time) (uint64, uint64) {
+		return updateNetworkSpeedCounters(map[string]networkCounter{"eth0": {Tx: tx, Rx: rx}}, now, "")
+	}
+
+	up, down := updateNetworkSpeedSample(1_000, 2_000, base)
+	if up != 0 || down != 0 {
+		t.Fatalf("first sample = %d/%d, want zero", up, down)
+	}
+
+	up, down = updateNetworkSpeedSample(1_150, 2_300, base.Add(1500*time.Millisecond))
+	if up != 100 || down != 200 {
+		t.Fatalf("elapsed sample = %d/%d, want 100/200", up, down)
+	}
+
+	// A counter reset must not become a huge unsigned rate.
+	up, down = updateNetworkSpeedSample(50, 75, base.Add(2500*time.Millisecond))
+	if up != 0 || down != 0 {
+		t.Fatalf("reset sample = %d/%d, want zero", up, down)
+	}
+
+	up, down = updateNetworkSpeedSample(150, 275, base.Add(4500*time.Millisecond))
+	if up != 50 || down != 100 {
+		t.Fatalf("post-reset sample = %d/%d, want 50/100", up, down)
+	}
+}
+
+func TestUpdateNetworkSpeedSampleResetsWhenNICFilterChanges(t *testing.T) {
+	resetNetworkSpeedSample()
+	t.Cleanup(resetNetworkSpeedSample)
+	base := time.Unix(200, 0)
+	updateNetworkSpeedSampleForFilter := func(tx, rx uint64, now time.Time, filterKey string) (uint64, uint64) {
+		return updateNetworkSpeedCounters(map[string]networkCounter{"eth0": {Tx: tx, Rx: rx}}, now, filterKey)
+	}
+
+	if up, down := updateNetworkSpeedSampleForFilter(100, 200, base, "include:eth*"); up != 0 || down != 0 {
+		t.Fatalf("first filtered sample = %d/%d, want zero", up, down)
+	}
+	if up, down := updateNetworkSpeedSampleForFilter(200, 400, base.Add(time.Second), "include:eth*"); up != 100 || down != 200 {
+		t.Fatalf("same filtered sample = %d/%d, want 100/200", up, down)
+	}
+	if up, down := updateNetworkSpeedSampleForFilter(900, 1_000, base.Add(2*time.Second), "include:wlan*"); up != 0 || down != 0 {
+		t.Fatalf("changed filtered sample = %d/%d, want zero", up, down)
+	}
+}
+
+func TestProcNetConnectionsCountFixture(t *testing.T) {
+	root := t.TempDir()
+	netDir := filepath.Join(root, "net")
+	if err := os.MkdirAll(netDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const tcp = "sl  local_address rem_address st\n 0: 0100007F:0019 00000000:0000 0A\n 1: 0100007F:001A 00000000:0000 01\n"
+	const udp = "sl  local_address rem_address st\n 0: 0100007F:0035 00000000:0000 07\n"
+	if err := os.WriteFile(filepath.Join(netDir, "tcp"), []byte(tcp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(netDir, "udp"), []byte(udp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tcpCount, udpCount, err := procNetConnectionsCount(root)
+	if err != nil {
+		t.Fatalf("procNetConnectionsCount() failed: %v", err)
+	}
+	if tcpCount != 2 || udpCount != 1 {
+		t.Fatalf("fixture counts = %d/%d, want 2/1", tcpCount, udpCount)
+	}
+}
+
+func TestProcNetConnectionsFallback(t *testing.T) {
+	fallbackErr := errors.New("fallback unavailable")
+	tcpCount, udpCount, err := connectionsCountWithProcFallback(t.TempDir(), func() (int, int, error) {
+		return 7, 8, nil
+	})
+	if err != nil || tcpCount != 7 || udpCount != 8 {
+		t.Fatalf("successful fallback = %d/%d, %v; want 7/8 nil", tcpCount, udpCount, err)
+	}
+
+	_, _, err = connectionsCountWithProcFallback(t.TempDir(), func() (int, int, error) {
+		return 0, 0, fallbackErr
+	})
+	if err == nil || !errors.Is(err, fallbackErr) || !strings.Contains(err.Error(), "proc net fast path failed") {
+		t.Fatalf("combined fallback error = %v", err)
+	}
+}
+
+func TestProcNetConnectionsFallbacksForEmptyFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "net"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "net", "tcp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tcpCount, udpCount, err := connectionsCountWithProcFallback(root, func() (int, int, error) {
+		return 7, 8, nil
+	})
+	if err != nil || tcpCount != 7 || udpCount != 8 {
+		t.Fatalf("empty proc file fallback = %d/%d, %v; want 7/8 nil", tcpCount, udpCount, err)
+	}
+}
+
+func TestUpdateNetworkSpeedCountersHandlesNICMembership(t *testing.T) {
+	resetNetworkSpeedSample()
+	t.Cleanup(resetNetworkSpeedSample)
+	base := time.Unix(300, 0)
+
+	first := map[string]networkCounter{
+		"eth0":  {Tx: 100, Rx: 200},
+		"wlan0": {Tx: 300, Rx: 400},
+	}
+	if up, down := updateNetworkSpeedCounters(first, base, "default"); up != 0 || down != 0 {
+		t.Fatalf("first NIC sample = %d/%d, want zero", up, down)
+	}
+
+	second := map[string]networkCounter{
+		"eth0":  {Tx: 200, Rx: 300},
+		"wlan0": {Tx: 350, Rx: 500},
+	}
+	if up, down := updateNetworkSpeedCounters(second, base.Add(time.Second), "default"); up != 150 || down != 200 {
+		t.Fatalf("steady NIC sample = %d/%d, want 150/200", up, down)
+	}
+
+	// eth1 appears with a pre-existing cumulative counter. It must be seeded,
+	// not treated as traffic since the previous sample.
+	third := map[string]networkCounter{
+		"eth0": {Tx: 300, Rx: 400},
+		"eth1": {Tx: 1_000_000, Rx: 2_000_000},
+	}
+	if up, down := updateNetworkSpeedCounters(third, base.Add(2*time.Second), "default"); up != 100 || down != 100 {
+		t.Fatalf("NIC addition sample = %d/%d, want 100/100", up, down)
+	}
+
+	// eth0 disappears and eth1 advances. The removed NIC contributes nothing,
+	// while eth1 uses its own established baseline.
+	fourth := map[string]networkCounter{
+		"eth1": {Tx: 1_000_100, Rx: 2_000_100},
+	}
+	if up, down := updateNetworkSpeedCounters(fourth, base.Add(3*time.Second), "default"); up != 100 || down != 100 {
+		t.Fatalf("NIC removal sample = %d/%d, want 100/100", up, down)
+	}
 }
