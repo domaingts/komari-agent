@@ -2,7 +2,11 @@
 
 `komari-agent` is a Go monitoring agent for Komari. It collects host metrics and basic machine information, then reports them to a Komari server over HTTP and WebSocket.
 
-This reporting-only fork incorporates upstream **1.2.60** while retaining its custom behavior. Remote command execution, remote terminals, server-directed ping tasks, and self-updating are not included. WebSocket heartbeat pings are still used to maintain reporting connections. Cloudflare Access support, the one-second default interval, and the fork's existing default NIC exclusions are retained.
+This reporting-only fork selectively incorporates upstream **1.5.11** while retaining its custom behavior. Remote command execution, SSH/remote terminals, server-directed ping tasks, remote file access/transfers, and self-updating are not included. WebSocket heartbeat pings are still used to maintain reporting connections. Cloudflare Access support, v1 reporting compatibility, the one-second default interval, and the fork's existing default NIC exclusions are retained.
+
+Applicable upstream improvements include Android `/sdcard` FUSE disk reporting, `nullfs` exclusion, Linux AMD GPU telemetry through an `amdgpu` sysfs fallback when ROCm is unavailable or returns no devices, and detailed Windows NVIDIA telemetry through `nvidia-smi`. Connection recovery is independent of the metric interval, without rounding fractional intervals or generating extra samples on recovery.
+
+Upstream task/event/pull dispatch, terminal/file control, warning/MOTD machinery, self-update/snapshot tooling, v1 removal, and additional release platforms are intentionally excluded.
 
 ## What it reports
 
@@ -18,11 +22,17 @@ This reporting-only fork incorporates upstream **1.2.60** while retaining its cu
 
 ## Build
 
-Go 1.27 or newer is required. Release artifacts remain Linux/amd64 v1, v2, and v3 tarballs containing the `agent` binary; the upstream baseline is independent of the fork's release version.
+Go 1.27 or newer is required. Release artifacts remain Linux/amd64 v1, v2, and v3 tarballs containing the `agent` binary. These are x86-64 CPU microarchitecture variants, not reporting protocol versions. The upstream baseline is independent of the fork's release version.
 
 ```bash
 go build ./...
 ```
+
+## Install
+
+`install.sh` supports Linux/amd64 and downloads `komari-agent-linux-amd64-v1.tar.gz` only from this fork's releases at `domaingts/komari-agent`, honoring an explicit version or configured proxy. It extracts and validates the `agent` executable in a temporary staging directory before stopping the current service or replacing its binary. Unsupported platforms and download/archive/validation failures leave the existing installation untouched.
+
+The installer does not download the full-control upstream agent. Source-level Windows GPU support does not expand the fork's release or installer platform matrix.
 
 ## Run
 
@@ -159,7 +169,7 @@ By default the agent uses JSON-RPC v2 at `/api/clients/v2/rpc` for `agent.report
 
 Three consecutive classified protocol failures trigger fallback to the legacy v1 endpoints. Ordinary network errors do not count as protocol failures, and a successful protocol exchange clears the failure count. Use `--protocol-version 1` to explicitly connect using the legacy protocol. Both Cloudflare Access headers are sent on panel requests when both credentials are configured, including registration, v1/v2 handshakes, and HTTP fallback.
 
-CPU and network usage sampling is nonblocking. Network rates reflect elapsed time between samples; the initial rate sample is zero. Basic information includes both logical and physical CPU core counts. NIC globs retain existing precedence: default exclusions first, then explicit inclusion before explicit exclusion. Unlike upstream 1.2.60, this fork does not add `tap`, `fwbr`, and `fwpr` to its default exclusions; configure them explicitly if needed.
+CPU and network usage sampling is nonblocking. Network rates reflect elapsed time between samples; the initial rate sample is zero. Basic information includes both logical and physical CPU core counts. NIC globs retain existing precedence: default exclusions first, then explicit inclusion before explicit exclusion. This fork does not add `tap`, `fwbr`, and `fwpr` to its default exclusions; configure them explicitly if needed.
 
 ## Auto-discovery
 

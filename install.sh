@@ -35,6 +35,110 @@ log_config() {
     echo -e "${CYAN}[CONFIG]${NC} $1"
 }
 
+validate_release_platform() {
+    local release_os="${1:-$(uname -s)}"
+    local release_arch="${2:-$(uname -m)}"
+    if [[ "$release_os" != "Linux" || "$release_arch" != "x86_64" ]]; then
+        log_error "This fork publishes Linux/amd64 releases only (detected $release_os/$release_arch)."
+        return 1
+    fi
+}
+
+release_download_url() {
+    local version="${1:-latest}"
+    local proxy="${2%/}"
+    local download_path="download/${version}"
+    if [[ "$version" == "latest" ]]; then
+        download_path="latest/download"
+    fi
+    local url="https://github.com/domaingts/komari-agent/releases/${download_path}/komari-agent-linux-amd64-v1.tar.gz"
+    if [[ -n "$proxy" ]]; then
+        url="${proxy}/${url}"
+    fi
+    printf '%s\n' "$url"
+}
+
+validate_staged_agent() {
+    local agent_path="$1"
+    local help_output
+    if [[ ! -f "$agent_path" || -L "$agent_path" || ! -s "$agent_path" ]]; then
+        log_error "The release archive did not contain a regular, nonempty agent binary."
+        return 1
+    fi
+    if ! chmod 755 "$agent_path" || ! help_output=$("$agent_path" --help 2>&1); then
+        log_error "The staged agent could not run its offline help check."
+        return 1
+    fi
+    if [[ "$help_output" != *"--endpoint"* || "$help_output" != *"--token"* ||
+          "$help_output" == *"--disable-web-ssh"* || "$help_output" == *"--disable-auto-update"* ||
+          "$help_output" == *"--show-warning"* ]]; then
+        log_error "The staged binary does not match this reporting-only fork."
+        return 1
+    fi
+}
+
+stage_release() {
+    local staging_dir="$1"
+    local download_url="$2"
+    local archive_path="${staging_dir}/release.tar.gz"
+    local member_listing
+    if ! curl --fail --location --silent --show-error --output "$archive_path" "$download_url"; then
+        log_error "Release download failed."
+        return 1
+    fi
+    # Select one regular member and stream it out; never extract archive paths.
+    if ! member_listing=$(tar -tvzf "$archive_path" agent) ||
+       [[ "$member_listing" != -* || "$member_listing" == *$'\n'* ]]; then
+        log_error "The release archive must contain exactly one regular agent member."
+        return 1
+    fi
+    if ! tar -xOzf "$archive_path" agent > "${staging_dir}/agent"; then
+        log_error "Could not read the agent binary from the release archive."
+        return 1
+    fi
+    validate_staged_agent "${staging_dir}/agent"
+}
+
+validate_release_destination() {
+    if [[ -d "$1" ]]; then
+        log_error "The agent destination is a directory or points to one: $1"
+        return 1
+    fi
+}
+
+install_release_binary() (
+    local install_dir="$1"
+    local download_url="$2"
+    local staging_dir=""
+    trap 'if [[ -n "$staging_dir" ]]; then rm -rf -- "$staging_dir"; fi' EXIT
+    trap 'exit 1' HUP INT TERM
+
+    validate_release_platform || return 1
+    validate_release_destination "${install_dir}/agent" || return 1
+    if ! mkdir -p -- "$install_dir" ||
+       ! staging_dir=$(mktemp -d "${install_dir}/.komari-agent-install.XXXXXX"); then
+        log_error "Could not create a release staging directory."
+        return 1
+    fi
+    stage_release "$staging_dir" "$download_url" || return 1
+
+    # Recheck after staging before affecting the existing service.
+    validate_release_destination "${install_dir}/agent" || return 1
+    # Preserve the running installation until the replacement has been checked.
+    uninstall_previous || return 1
+    if ! mv -f -- "${staging_dir}/agent" "${install_dir}/agent"; then
+        log_error "Could not replace the installed agent binary."
+        return 1
+    fi
+)
+
+# Sourcing exposes only the isolated release helpers, not installation actions.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
+validate_release_platform || exit 1
+
 # Default values
 service_name="komari-agent"
 target_dir="/opt/komari"
@@ -179,20 +283,14 @@ uninstall_previous() {
         fi
     fi
     
-    # Remove old binary if it exists
-    if [ -f "$komari_agent_path" ]; then
-        log_info "Removing old binary..."
-        rm -f "$komari_agent_path"
-    fi
+    # The validated replacement will atomically overwrite the old binary.
+    return 0
 }
-
-# Uninstall previous installation
-uninstall_previous
 
 install_dependencies() {
     log_step "Checking and installing dependencies..."
 
-    local deps="curl"
+    local deps="curl tar"
     local missing_deps=""
     for cmd in $deps; do
         if ! command -v $cmd >/dev/null 2>&1; then
@@ -287,40 +385,15 @@ else
     log_info "No version specified, installing the latest version."
 fi
 
-# Construct download URL
-file_name="komari-agent-${os_name}-${arch}"
-if [ "$version_to_install" = "latest" ]; then
-    download_path="latest/download"
-else
-    download_path="download/${version_to_install}"
-fi
-
-if [ -n "$github_proxy" ]; then
-    # Use proxy for GitHub releases
-    download_url="${github_proxy}/https://github.com/komari-monitor/komari-agent/releases/${download_path}/${file_name}"
-else
-    # Direct access to GitHub releases
-    download_url="https://github.com/komari-monitor/komari-agent/releases/${download_path}/${file_name}"
-fi
-
-log_step "Creating installation directory: ${GREEN}$target_dir${NC}"
-mkdir -p "$target_dir"
-
-# Download binary
-if [ -n "$github_proxy" ]; then
-    log_step "Downloading $file_name via proxy..."
-    log_info "URL: ${CYAN}$download_url${NC}"
-else
-    log_step "Downloading $file_name directly..."
-    log_info "URL: ${CYAN}$download_url${NC}"
-fi
-if ! curl -L -o "$komari_agent_path" "$download_url"; then
-    log_error "Download failed"
+# Install the generic amd64 build from this reporting-only fork.
+file_name="komari-agent-linux-amd64-v1.tar.gz"
+download_url=$(release_download_url "$version_to_install" "$github_proxy")
+log_step "Downloading and validating $file_name..."
+log_info "URL: ${CYAN}$download_url${NC}"
+if ! install_release_binary "$target_dir" "$download_url"; then
+    log_error "Installation stopped without using an unchecked release."
     exit 1
 fi
-
-# Set executable permissions
-chmod +x "$komari_agent_path"
 log_success "Komari-agent installed to ${GREEN}$komari_agent_path${NC}"
 
 # Detect init system and configure service
@@ -514,10 +587,6 @@ start_service() {
     procd_set_param stderr 1
     procd_set_param user root
     procd_close_instance
-}
-
-stop_service() {
-    killall \$(basename \$PROG)
 }
 
 reload_service() {

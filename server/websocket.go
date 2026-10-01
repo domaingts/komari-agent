@@ -33,6 +33,12 @@ func EstablishWebSocketConnection() {
 }
 
 func establishWebSocketConnectionContext(ctx context.Context) {
+	establishWebSocketConnectionWithReport(ctx, func() []byte {
+		return monitoring.GenerateReport()
+	})
+}
+
+func establishWebSocketConnectionWithReport(ctx context.Context, report func() []byte) {
 	var conn *ws.SafeConn
 	var readDone <-chan struct{}
 	var stopConnWatch func()
@@ -45,11 +51,21 @@ func establishWebSocketConnectionContext(ctx context.Context) {
 	}()
 
 	interval := normalizedInterval(flags.Interval)
-	dataTicker := time.NewTicker(time.Duration(interval * float64(time.Second)))
-	defer dataTicker.Stop()
+	reportInterval := time.Duration(interval * float64(time.Second))
+	reportTimer := time.NewTimer(reportInterval)
+	defer reportTimer.Stop()
+	reconnectTimer := time.NewTimer(time.Second)
+	defer reconnectTimer.Stop()
 	heartbeatTicker := time.NewTicker(30 * time.Second)
 	defer heartbeatTicker.Stop()
 
+	// Track actual samples across both transports so recovery cannot sample
+	// twice in quick succession or round fractional report intervals upward.
+	var lastReportAt time.Time
+	collectReport := func() []byte {
+		lastReportAt = time.Now()
+		return report()
+	}
 	nextProtocol := requestedProtocolVersion()
 	activeProtocol := 0
 
@@ -57,74 +73,83 @@ func establishWebSocketConnectionContext(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-dataTicker.C:
-			if conn == nil {
-				var err error
-				connectProtocol := nextProtocol
-				retry := 0
-				for retry <= flags.MaxRetries {
-					if retry > 0 {
-						log.Println("Retrying websocket connection, attempt:", retry)
-					}
-					conn, err = connectWebSocketContext(ctx, buildWebSocketEndpoint(connectProtocol))
-					if err == nil {
-						activeProtocol = connectProtocol
-						nextProtocol = connectProtocol
-						setConnectionProtocolVersion(activeProtocol)
-						log.Printf("WebSocket connected using v%d protocol", activeProtocol)
-						done := make(chan struct{})
-						readDone = done
-						stopConnWatch = watchConnectionContext(ctx, conn)
-						go handleWebSocketMessages(conn, activeProtocol, done)
-						break
-					}
-					if connectProtocol >= 2 && shouldFallbackToV1(connectProtocol, err) {
-						log.Printf("v2 WebSocket endpoint failed (%v), falling back to v1", err)
-						connectProtocol = 1
-						nextProtocol = 1
-						retry = 0
-						continue
-					}
-					log.Println("Failed to connect to WebSocket:", err)
-					retry++
-					if retry <= flags.MaxRetries && !waitForReconnect(ctx) {
-						return
-					}
+		case <-reconnectTimer.C:
+			if conn != nil {
+				continue
+			}
+			var err error
+			connectProtocol := nextProtocol
+			retry := 0
+			for retry <= flags.MaxRetries {
+				if retry > 0 {
+					log.Println("Retrying websocket connection, attempt:", retry)
 				}
-
-				if conn == nil {
-					log.Println("Max retries reached.")
-					if connectProtocol < 2 {
-						return
-					}
-					var fallbackErr error
-					conn, fallbackErr = runPostFallbackContext(ctx, buildWebSocketEndpoint(2), interval)
-					if fallbackErr != nil {
-						var thresholdErr *v2FallbackError
-						if errors.As(fallbackErr, &thresholdErr) {
-							log.Printf("v2 POST fallback failed (%v), falling back to v1", fallbackErr)
-							nextProtocol = 1
-							setConnectionProtocolVersion(1)
-							continue
-						}
-						log.Println("POST fallback stopped:", fallbackErr)
-						return
-					}
-					activeProtocol = 2
-					nextProtocol = 2
+				conn, err = connectWebSocketContext(ctx, buildWebSocketEndpoint(connectProtocol))
+				if err == nil {
+					activeProtocol = connectProtocol
+					nextProtocol = connectProtocol
 					setConnectionProtocolVersion(activeProtocol)
-					log.Println("WebSocket recovered from POST fallback")
+					log.Printf("WebSocket connected using v%d protocol", activeProtocol)
 					done := make(chan struct{})
 					readDone = done
 					stopConnWatch = watchConnectionContext(ctx, conn)
 					go handleWebSocketMessages(conn, activeProtocol, done)
+					break
+				}
+				if connectProtocol >= 2 && shouldFallbackToV1(connectProtocol, err) {
+					log.Printf("v2 WebSocket endpoint failed (%v), falling back to v1", err)
+					connectProtocol = 1
+					nextProtocol = 1
+					retry = 0
+					continue
+				}
+				log.Println("Failed to connect to WebSocket:", err)
+				retry++
+				if retry <= flags.MaxRetries && !waitForReconnect(ctx) {
+					return
 				}
 			}
 
 			if conn == nil {
+				log.Println("Max retries reached.")
+				if connectProtocol < 2 {
+					return
+				}
+				var fallbackErr error
+				conn, fallbackErr = runPostFallbackWithReport(ctx, buildWebSocketEndpoint(2), interval, collectReport)
+				if fallbackErr != nil {
+					var thresholdErr *v2FallbackError
+					if errors.As(fallbackErr, &thresholdErr) {
+						log.Printf("v2 POST fallback failed (%v), falling back to v1", fallbackErr)
+						nextProtocol = 1
+						setConnectionProtocolVersion(1)
+						reconnectTimer.Reset(0)
+						continue
+					}
+					log.Println("POST fallback stopped:", fallbackErr)
+					return
+				}
+				activeProtocol = 2
+				nextProtocol = 2
+				setConnectionProtocolVersion(activeProtocol)
+				log.Println("WebSocket recovered from POST fallback")
+				done := make(chan struct{})
+				readDone = done
+				stopConnWatch = watchConnectionContext(ctx, conn)
+				go handleWebSocketMessages(conn, activeProtocol, done)
+			}
+
+			delay := time.Duration(0)
+			if !lastReportAt.IsZero() {
+				delay = time.Until(lastReportAt.Add(reportInterval))
+			}
+			reportTimer.Reset(delay)
+
+		case <-reportTimer.C:
+			if conn == nil {
 				continue
 			}
-			data := monitoring.GenerateReport()
+			data := collectReport()
 			if activeProtocol >= 2 {
 				data = v2.BuildReportPayload(data)
 			}
@@ -143,6 +168,9 @@ func establishWebSocketConnectionContext(ctx context.Context) {
 				if requestedProtocolVersion() >= 2 {
 					nextProtocol = 2
 				}
+				reconnectTimer.Reset(recoveryInterval())
+			} else {
+				reportTimer.Reset(time.Until(lastReportAt.Add(reportInterval)))
 			}
 
 		case <-heartbeatTicker.C:
@@ -164,12 +192,14 @@ func establishWebSocketConnectionContext(ctx context.Context) {
 				if requestedProtocolVersion() >= 2 {
 					nextProtocol = 2
 				}
+				reportTimer.Stop()
+				reconnectTimer.Reset(recoveryInterval())
 			}
 
 		case <-readDone:
 			// Reader termination is a connection failure even if no writer has
 			// attempted an operation yet. Close and clear everything before the
-			// next tick so a second reporter cannot be spawned for this socket.
+			// next connection attempt so a second reporter cannot be spawned.
 			log.Println("WebSocket disconnected")
 			downgraded := requestedProtocolVersion() >= 2 && uploadProtocolVersion() == 1
 			oldConn, oldReadDone, oldStopWatch := conn, readDone, stopConnWatch
@@ -187,6 +217,8 @@ func establishWebSocketConnectionContext(ctx context.Context) {
 			} else if requestedProtocolVersion() >= 2 {
 				nextProtocol = 2
 			}
+			reportTimer.Stop()
+			reconnectTimer.Reset(recoveryInterval())
 		}
 	}
 }
@@ -282,6 +314,12 @@ type websocketRecoveryResult struct {
 // handshakes run independently. A failed handshake is bounded by the dialer's
 // handshake timeout and cannot block the report ticker.
 func runPostFallbackContext(ctx context.Context, websocketEndpoint string, interval float64) (*ws.SafeConn, error) {
+	return runPostFallbackWithReport(ctx, websocketEndpoint, interval, func() []byte {
+		return monitoring.GenerateReport()
+	})
+}
+
+func runPostFallbackWithReport(ctx context.Context, websocketEndpoint string, interval float64, report func() []byte) (*ws.SafeConn, error) {
 	log.Println("Entering v2 POST fallback mode")
 	runCtx, cancel := context.WithCancel(ctx)
 	reportTicker := time.NewTicker(time.Duration(normalizedInterval(interval) * float64(time.Second)))
@@ -302,7 +340,7 @@ func runPostFallbackContext(ctx context.Context, websocketEndpoint string, inter
 			return nil, runCtx.Err()
 		case <-reportTicker.C:
 			reportID := fmt.Sprintf("report-%d", time.Now().UnixNano())
-			_, err := postV2RequestContext(runCtx, v2.BuildReportRequest(reportID, monitoring.GenerateReport()))
+			_, err := postV2RequestContext(runCtx, v2.BuildReportRequest(reportID, report()))
 			if err != nil {
 				if shouldFallbackToV1(2, err) {
 					return nil, &v2FallbackError{Err: err}

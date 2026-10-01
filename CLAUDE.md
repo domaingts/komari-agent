@@ -26,9 +26,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Repository-specific notes
 
 - Go 1.27 or newer is required. There is no dedicated lint configuration in this repo. The routine validation path is `go test ./...`, `GOEXPERIMENT=jsonv2 go test ./...`, `go build ./...`, and checking `go run . --help` when flags or commands change.
-- This fork incorporates upstream 1.2.60 but remains reporting-only: do not restore remote execution, terminal, server-requested ping tasks, self-update, or their removed flags/dependencies. WebSocket heartbeat pings are retained.
-- Release builds inject `update.CurrentVersion` via GoReleaser (`.goreleaser.yaml`), so keep `update/update.go` small and stable.
-- `install.sh` currently appears to assume release artifact names that may not match `.goreleaser.yaml`; treat it carefully if touching release/install behavior.
+- This fork selectively incorporates upstream 1.5.11 but remains reporting-only: do not restore remote execution, SSH/terminal, server-requested ping tasks, remote file access/transfers, task/event/pull dispatch, self-update, or their removed flags/dependencies. WebSocket heartbeat pings are retained.
+- Release builds inject `update.CurrentVersion` via GoReleaser (`.goreleaser.yaml`), so keep `update/update.go` small and stable. The incorporated upstream baseline is independent of the fork's release version.
+- `install.sh` consumes only the `domaingts/komari-agent` Linux/amd64 v1 tarball containing `agent`. Preserve fork-specific downloads and staging/validation before replacement; never substitute upstream full-control binaries.
 
 ## High-level architecture
 
@@ -57,7 +57,7 @@ That means changes to runtime behavior usually cross `cmd/root.go`, `server/basi
 - `monitoring/monitoring.go` assembles the outbound metrics payload.
 - Most raw metric collection lives in `monitoring/unit/`.
 - The `unit` package is intentionally OS-specific in places, with separate files for Linux, Darwin, Windows, and FreeBSD behavior.
-- CPU usage and network speed sampling are nonblocking and measure between samples; avoid extra calls that disturb the sampling window. Use `CpuStaticInfo()` for metadata. The reporting ticker no longer subtracts a second from the configured interval; this fork retains its one-second default.
+- CPU usage and network speed sampling are nonblocking and measure between samples; avoid extra calls that disturb the sampling window. Use `CpuStaticInfo()` for metadata. Report and reconnect timers are independent, preserve fractional intervals, and share the last sample time across WebSocket/POST recovery. This fork retains its one-second default/minimum.
 - Monthly network tests must isolate `netstatic.SaveFilePath`, stop accounting before cleanup, and restore global configuration; never write test accounting state into the working directory.
 
 Key metric areas:

@@ -115,6 +115,12 @@ func isPhysicalDisk(part disk.PartitionStat) bool {
 	if fstype == "fuseblk" {
 		return true
 	}
+
+	// Android's /sdcard FUSE mount represents local storage, not a network disk.
+	if part.Device == "/dev/fuse" && fstype == "fuse" && mountpoint == "/sdcard" {
+		return true
+	}
+
 	var fstypeToExclude = []string{
 		"tmpfs",
 		"devtmpfs",
@@ -135,6 +141,7 @@ func isPhysicalDisk(part disk.PartitionStat) bool {
 		"debugfs",
 		"binfmt_misc",
 		"securityfs",
+		"nullfs",
 	}
 	for _, fs := range fstypeToExclude {
 		if fstype == fs || strings.HasPrefix(fstype, fs) {

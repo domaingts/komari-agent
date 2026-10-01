@@ -27,6 +27,7 @@ func TestEstablishV2PostFallbackRecoversWebSocket(t *testing.T) {
 
 	var wsAttempts atomic.Int32
 	var wsSuccesses atomic.Int32
+	var wsReports atomic.Int32
 	var postReports atomic.Int32
 	var allowWebSocket atomic.Bool
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -51,12 +52,35 @@ func TestEstablishV2PostFallbackRecoversWebSocket(t *testing.T) {
 				if _, _, err := conn.ReadMessage(); err != nil {
 					return
 				}
+				wsReports.Add(1)
 			}
+		}
+		var request struct {
+			JSONRPC string `json:"jsonrpc"`
+			ID      string `json:"id"`
+			Method  string `json:"method"`
+			Params  struct {
+				Report json.RawMessage `json:"report"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode fallback report: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if request.JSONRPC != "2.0" || request.Method != "agent.report" || request.ID == "" || len(request.Params.Report) == 0 {
+			t.Errorf("invalid fallback report: %+v", request)
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 		postReports.Add(1)
 		allowWebSocket.Store(true)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"report","result":{}}`))
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{},
+		}); err != nil {
+			t.Errorf("encode fallback response: %v", err)
+		}
 	}))
 	defer server.Close()
 	flags.Endpoint = server.URL
@@ -64,8 +88,12 @@ func TestEstablishV2PostFallbackRecoversWebSocket(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	done := make(chan struct{})
+	samples := make(chan time.Time, 8)
 	go func() {
-		establishWebSocketConnectionContext(ctx)
+		establishWebSocketConnectionWithReport(ctx, func() []byte {
+			samples <- time.Now()
+			return []byte(`{"uptime":7}`)
+		})
 		close(done)
 	}()
 	select {
@@ -76,8 +104,16 @@ func TestEstablishV2PostFallbackRecoversWebSocket(t *testing.T) {
 	if postReports.Load() == 0 {
 		t.Fatal("v2 POST fallback did not report")
 	}
-	if wsAttempts.Load() < 2 || wsSuccesses.Load() == 0 {
-		t.Fatalf("websocket was not recovered: attempts=%d successes=%d", wsAttempts.Load(), wsSuccesses.Load())
+	if wsAttempts.Load() < 2 || wsSuccesses.Load() == 0 || wsReports.Load() == 0 {
+		t.Fatalf("websocket reporting was not recovered: attempts=%d successes=%d reports=%d", wsAttempts.Load(), wsSuccesses.Load(), wsReports.Load())
+	}
+	close(samples)
+	var previous time.Time
+	for sampledAt := range samples {
+		if !previous.IsZero() && sampledAt.Sub(previous) < 950*time.Millisecond {
+			t.Fatalf("POST-to-WebSocket recovery disturbed the sampling window: %s", sampledAt.Sub(previous))
+		}
+		previous = sampledAt
 	}
 }
 

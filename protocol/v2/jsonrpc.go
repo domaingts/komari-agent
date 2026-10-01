@@ -1,11 +1,7 @@
 // Package v2 defines the reporting-only JSON-RPC transport.
 package v2
 
-import (
-	"encoding/json"
-
-	v1 "github.com/komari-monitor/komari-agent/protocol/v1"
-)
+import "encoding/json"
 
 const (
 	Version              = "2.0"
@@ -46,11 +42,11 @@ func NewRequest(id any, method string, params any) []byte {
 	return payload
 }
 
-func BuildReportPayload(report v1.ReportPayload) []byte {
+func BuildReportPayload(report []byte) []byte {
 	return NewNotification(MethodAgentReport, reportParams{Report: json.RawMessage(report)})
 }
 
-func BuildReportRequest(id any, report v1.ReportPayload) []byte {
+func BuildReportRequest(id any, report []byte) []byte {
 	return NewRequest(id, MethodAgentReport, reportParams{Report: json.RawMessage(report)})
 }
 
