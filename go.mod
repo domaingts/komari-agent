@@ -4,16 +4,16 @@ go 1.27
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/klauspost/cpuid/v2 v2.4.1
-	github.com/shirou/gopsutil/v4 v4.26.9
+	github.com/klauspost/cpuid/v2 v2.4.2
+	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
-	golang.org/x/net v0.61.0
-	golang.org/x/sys v0.49.0
+	github.com/spf13/pflag v1.1.0
+	golang.org/x/net v0.62.0
+	golang.org/x/sys v0.50.0
 )
 
 require (
-	github.com/ebitengine/purego v0.11.1 // indirect
+	github.com/ebitengine/purego v0.11.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
